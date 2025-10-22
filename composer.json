@@ -1,0 +1,40 @@
+{
+    "name": "yasser-elgammal/lara-sms",
+    "description": "A package to sending SMS for laravel projects.",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "YasserElgammal\\LaraSms\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "YasserElgammal",
+            "email": "yassermelgammal@gmail.com"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [
+                "YasserElgammal\\LaraSms\\LaraSmsServiceProvider"
+            ],
+            "aliases": {
+                "LaraSms": "YasserElgammal\\LaraSms\\Facades\\LaraSms"
+            }
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require-dev": {
+        "orchestra/testbench": "^10.4",
+        "phpunit/phpunit": "^11.5"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "YasserElgammal\\LaraSms\\Tests\\": "tests/"
+        }
+    }
+}
