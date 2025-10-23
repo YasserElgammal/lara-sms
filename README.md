@@ -234,7 +234,7 @@ LaraSms::builder()
 #### Controlling Fallback Strategies
 
 ```php
-// Strategy 1: Try All Gateways (Default)
+// Strategy 1: Try All Gateways
 // Attempts all gateways until one succeeds
 LaraSms::builder()
     ->to('201234567890')
@@ -251,7 +251,7 @@ LaraSms::builder()
 ```
 
 ```php
-// Strategy 2: Fail Fast
+// Strategy 2: Fail Fast (Default)
 // Stops on first non-retryable error
 LaraSms::builder()
     ->to('201234567890')
