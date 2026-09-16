@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مراجعة Lara SMS</title>
+  <style>
+    body {
+      font-family: Tahoma, Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #f7f9fc;
+      color: #1f2937;
+      line-height: 1.8;
+    }
+    .container {
+      max-width: 1000px;
+      margin: auto;
+      background: white;
+      padding: 28px;
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+    }
+    h1, h2, h3 { color: #0f172a; }
+    .card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin: 14px 0;
+    }
+    .good { border-right: 6px solid #16a34a; }
+    .weak { border-right: 6px solid #dc2626; }
+    .recommend { border-right: 6px solid #2563eb; }
+    ul { padding-right: 20px; }
+    code {
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.95em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>مراجعة فنية لحزمة Lara SMS</h1>
+    <h2>تصحيح التقرير السابق</h2>
+    <p>الاستثناءات SmsException وRetryableException وNonRetryableException كانت موجودة بالفعل. المشكلة كانت تحويلها إلى نص داخل البوابات والمدير ثم اتخاذ قرار fallback بمطابقة النص.</p>
+    <h2>التحديث المنفذ</h2>
+    <p>أضيف الحقل retryable إلى SmsResult للحفاظ على التصنيف: true للأخطاء القابلة لإعادة المحاولة، false للأخطاء الدائمة، وnull للأخطاء غير المصنفة. لم تعد قرارات المدير تعتمد على نص الخطأ.</p>
+    <p>FAIL_FAST يستمر فقط بعد فشل مصنف بأنه قابل لإعادة المحاولة. TRY_ALL يستمر بعد أي فشل. يعيد HTTP محاولة 429 و5xx ضمن العدد والفاصل المحددين؛ العدد يشمل المحاولة الأولى.</p>
+    <p>أضيف InvalidConfigurationException والتحقق من بنية الإعدادات وخيارات HTTP وأسماء البوابات. تستخدم فحوص بيانات الاعتماد الموجودة تصنيف الخطأ الدائم.</p>
+    <p>أعلنت متطلبات التشغيل PHP ^8.2 وIlluminate ^12.0. أضيفت اختبارات PHPUnit/Testbench للنجاح وإعادة المحاولة وfallback وFAIL_FAST والإعدادات والطوابير.</p>
+    <p>أضيف SendSms وBuilder::queue. للمهمة محاولة واحدة على مستوى الطابور، ويصل فشل الإرسال إلى العامل عبر استثناء. تستمر محاولات HTTP والبوابات داخل هذه المحاولة.</p>
+    <h2>الحدود والعمل المتبقي</h2>
+    <p>أخطاء الاتصال لا تعاد تلقائياً في HTTP لأن انتهاء المهلة قد يحدث بعد قبول الرسالة. أخطاء المزود داخل استجابة HTTP ناجحة تبقى غير مصنفة ما لم تصنفها البوابة صراحة.</p>
+    <p>لا يوجد ضمان للإرسال مرة واحدة. إعادة محاولة 5xx أو TRY_ALL أو إعادة تشغيل مهمة فاشلة يدوياً قد تسبب التكرار. يجب ضبط مهلة العامل وretry_after وفق المدة الكاملة للمحاولات. يشرح README طريقة الاستخدام والقيود.</p>
+    <p>نجحت الاختبارات المحلية باستخدام HTTP وهمي. تعذر تحديث composer.lock بسبب تعذر الاتصال بالوكيل الشبكي. ما زال مطلوباً توسيع اختبارات كل مزود والتحقق الدولي من الأرقام .</p>
+    <h2>تحسين السجلات والمراقبة — تم التنفيذ</h2>
+    <p>تم تحسين السجلات: معرّف تتبّع لكل إرسال، مدة الطلب والمحاولات وتصنيف الخطأ، وإخفاء رقم المستلم وحذف الردود الخام ونصوص الاستثناءات من السجلات. نجح 16 اختباراً و51 تحققاً. السجلات جاهزة للربط بأدوات المراقبة؛ لم تضف لوحة متابعة أو تنبيهات.</p>
+  </div>
+</body>
+</html>
