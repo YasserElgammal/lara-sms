@@ -11,6 +11,19 @@ use YasserElgammal\LaraSms\Exceptions\RetryableException;
 
 abstract class AbstractHttpConnection implements HttpConnection
 {
+    private array $telemetry = [];
+
+    public function withTelemetry(array $context, callable $callback): mixed
+    {
+        $previous = $this->telemetry;
+        $this->telemetry = $context;
+        try {
+            return $callback();
+        } finally {
+            $this->telemetry = $previous;
+        }
+    }
+
     protected int $timeout;
     protected int $retryAttempts;
     protected int $retryDelay;
@@ -19,6 +32,11 @@ abstract class AbstractHttpConnection implements HttpConnection
         protected HttpClient $httpClient,
         array $config = []
     ) {
+        foreach (['timeout' => 1, 'retry_attempts' => 1, 'retry_delay' => 0] as $key => $minimum) {
+            if (isset($config[$key]) && (filter_var($config[$key], FILTER_VALIDATE_INT) === false || $config[$key] < $minimum)) {
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("Invalid HTTP option: {$key}");
+            }
+        }
         $this->timeout = $config['timeout'] ?? 30;
         $this->retryAttempts = $config['retry_attempts'] ?? 3;
         $this->retryDelay = $config['retry_delay'] ?? 1000;
@@ -50,14 +68,13 @@ abstract class AbstractHttpConnection implements HttpConnection
         $attempt = 0;
         $lastException = null;
 
+        $context = $this->telemetry ?: ['correlation_id' => bin2hex(random_bytes(16)), 'gateway' => static::class];
         while ($attempt < $this->retryAttempts) {
+            $httpStarted = hrtime(true);
+            $httpAttempt = $attempt + 1;
+            $status = null;
+            $httpFinished = null;
             try {
-                Log::debug("SMS HTTP Request", [
-                    'method' => $method,
-                    'url' => $url,
-                    'attempt' => $attempt + 1,
-                    'max_attempts' => $this->retryAttempts,
-                ]);
 
                 $response = $this->httpClient
                     ->timeout($this->timeout)
@@ -73,20 +90,20 @@ abstract class AbstractHttpConnection implements HttpConnection
                     $response = $response->get($url, $data);
                 }
 
+                $httpFinished = hrtime(true);
+                $status = $response->status();
                 if ($response->successful()) {
-                    Log::debug("SMS HTTP Response successful", [
-                        'status' => $response->status(),
-                    ]);
                     return $response->json() ?? [];
                 }
 
                 // Handle HTTP errors
-                if ($response->status() >= 500) {
-                    throw new RetryableException("Server error: {$response->status()}");
+                if ($response->status() === 429 || $response->status() >= 500) {
+                    throw new RetryableException("Retryable HTTP error: {$response->status()}");
                 }
 
                 throw new NonRetryableException("Client error: {$response->status()} - {$response->body()}");
             } catch (RequestException $e) {
+                $httpFinished ??= hrtime(true);
                 $lastException = $e;
 
                 if ($this->isRetryable($e)) {
@@ -99,6 +116,7 @@ abstract class AbstractHttpConnection implements HttpConnection
 
                 throw $lastException;
             } catch (RetryableException $e) {
+                $httpFinished ??= hrtime(true);
                 $lastException = $e;
                 $attempt++;
 
@@ -108,6 +126,14 @@ abstract class AbstractHttpConnection implements HttpConnection
                 }
 
                 throw $e;
+            } finally {
+                Log::debug('[LaraSms] http.completed', $context + [
+                    'http_attempt' => $httpAttempt,
+                    'max_attempts' => $this->retryAttempts,
+                    'status' => $status,
+                    'duration_ms' => round((($httpFinished ?? hrtime(true)) - $httpStarted) / 1e6, 3),
+                    'error_classification' => $status === null ? 'unknown' : ($status >= 200 && $status < 300 ? null : ($status === 429 || $status >= 500 ? 'retryable' : 'permanent')),
+                ]);
             }
         }
 
@@ -117,6 +143,6 @@ abstract class AbstractHttpConnection implements HttpConnection
     protected function isRetryable(\Throwable $e): bool
     {
         return $e instanceof RequestException &&
-            ($e->getCode() >= 500 || $e->getCode() === 429);
+            ($e->response->status() >= 500 || $e->response->status() === 429);
     }
 }

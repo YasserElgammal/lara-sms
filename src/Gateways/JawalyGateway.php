@@ -7,7 +7,6 @@ use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
 use YasserElgammal\LaraSms\Network\AbstractHttpConnection;
-use Illuminate\Support\Facades\Log;
 
 class JawalyGateway extends AbstractHttpConnection implements SmsGateway
 {
@@ -27,7 +26,7 @@ class JawalyGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->apiKey || !$this->apiSecert) {
-                throw new \Exception("Jawaly credentials not configured");
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("Jawaly credentials not configured");
             }
 
             $appHash = base64_encode("{$this->apiKey}:{$this->apiSecert}");
@@ -56,12 +55,6 @@ class JawalyGateway extends AbstractHttpConnection implements SmsGateway
             if (isset($response['messages'][0]['err_text'])) {
                 $error = $response['messages'][0]['err_text'];
 
-                Log::error('Jawaly SMS failed', [
-                    'to' => $message->to,
-                    'error' => $error,
-                    'response' => $response,
-                ]);
-
                 return new SmsResult(
                     success: false,
                     gateway: 'jawaly',
@@ -72,26 +65,18 @@ class JawalyGateway extends AbstractHttpConnection implements SmsGateway
             // Success response
             $messageId = $response['messages'][0]['id'] ?? null;
 
-            Log::info('Jawaly SMS sent successfully', [
-                'to' => $message->to,
-                'message_id' => $messageId,
-            ]);
-
             return new SmsResult(
                 success: true,
                 messageId: $messageId,
                 gateway: 'jawaly'
             );
         } catch (\Throwable $e) {
-            Log::error('Jawaly SMS error', [
-                'to' => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'jawaly',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

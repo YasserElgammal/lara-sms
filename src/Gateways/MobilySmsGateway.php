@@ -2,7 +2,6 @@
 
 namespace YasserElgammal\LaraSms\Gateways;
 
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -37,7 +36,7 @@ class MobilySmsGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->username || !$this->password) {
-                throw new \Exception('Mobily credentials not configured');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Mobily credentials not configured');
             }
 
             $unicode = $this->resolveUnicode($message->text); // 'u' or 'e'
@@ -64,13 +63,6 @@ class MobilySmsGateway extends AbstractHttpConnection implements SmsGateway
             $success = ($code === 100);
 
             if ($success) {
-                Log::info('Mobily SMS submitted', [
-                    'to'      => $message->to,
-                    'sender'  => $this->sender,
-                    'unicode' => $unicode,
-                    'code'    => $code,
-                    'raw'     => $raw,
-                ]);
 
                 // API doesn’t return a canonical message id in this endpoint;
                 // use null or synthesize one if you need it.
@@ -82,12 +74,6 @@ class MobilySmsGateway extends AbstractHttpConnection implements SmsGateway
             }
 
             $error = $this->humanReadableError($code) ?? 'Unknown error';
-            Log::error('Mobily SMS failed', [
-                'to'    => $message->to,
-                'code'  => $code,
-                'error' => $error,
-                'raw'   => $raw,
-            ]);
 
             return new SmsResult(
                 success: false,
@@ -95,15 +81,12 @@ class MobilySmsGateway extends AbstractHttpConnection implements SmsGateway
                 error: $error
             );
         } catch (\Throwable $e) {
-            Log::error('Mobily SMS exception', [
-                'to'    => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'mobilysms',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

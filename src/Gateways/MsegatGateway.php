@@ -3,7 +3,6 @@
 namespace YasserElgammal\LaraSms\Gateways;
 
 use Throwable;
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -28,7 +27,7 @@ class MsegatGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->userName || !$this->apiKey) {
-                throw new \Exception('Msegat credentials are missing.');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Msegat credentials are missing.');
             }
 
             // ملاحظة: numbers ممكن تقبل قائمة بأرقام مفصولة بفواصل, هنا بنفترض رقماً واحداً
@@ -42,26 +41,18 @@ class MsegatGateway extends AbstractHttpConnection implements SmsGateway
 
             $url = 'https://www.msegat.com/gw/sendsms.php';
 
-            Log::debug('[Msegat] Request payload', [
-                'url'     => $url,
-                'payload' => array_merge($payload, ['apiKey' => '***']), // اخفاء المفتاح
-            ]);
-
             $response = $this->postForm($url, $payload, [
                 'Accept' => 'application/json',
             ]);
 
             return $this->handleResponse($response, $message);
         } catch (Throwable $e) {
-            Log::error('[Msegat] Exception', [
-                'to'    => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'msegat',
                 error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null),
             );
         }
     }
@@ -72,10 +63,6 @@ class MsegatGateway extends AbstractHttpConnection implements SmsGateway
 
         if (is_array($parsed) && isset($parsed['code'])) {
             if ((int)$parsed['code'] === 1) {
-                Log::info('[Msegat] SMS sent successfully', [
-                    'to'       => $message->to,
-                    'response' => $parsed,
-                ]);
 
                 return new SmsResult(
                     success: true,
@@ -84,10 +71,6 @@ class MsegatGateway extends AbstractHttpConnection implements SmsGateway
                 );
             }
             $err = $parsed['message'] ?? $parsed['error'] ?? 'Unknown error';
-            Log::warning('[Msegat] SMS failed', [
-                'to'       => $message->to,
-                'response' => $parsed,
-            ]);
 
             return new SmsResult(
                 success: false,
@@ -97,10 +80,6 @@ class MsegatGateway extends AbstractHttpConnection implements SmsGateway
         }
 
         // لو مش قادرين نفسّرها، رجّع النص كما هو
-        Log::warning('[Msegat] Unrecognized response', [
-            'to'       => $message->to,
-            'response' => $response,
-        ]);
 
         return new SmsResult(
             success: false,

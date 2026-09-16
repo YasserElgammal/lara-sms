@@ -3,7 +3,6 @@
 namespace YasserElgammal\LaraSms\Gateways;
 
 use Throwable;
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -38,12 +37,12 @@ class DreamsGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->username || !$this->secretKey) {
-                throw new \Exception('Dreams credentials not configured (username/secret_key)');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Dreams credentials not configured (username/secret_key)');
             }
 
             $sender = $message->from ?? $this->defaultSender;
             if (!$sender) {
-                throw new \Exception('Dreams sender is required (configure default sender or pass $message->from)');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Dreams sender is required (configure default sender or pass $message->from)');
             }
 
             // Required fields
@@ -89,11 +88,6 @@ class DreamsGateway extends AbstractHttpConnection implements SmsGateway
             $isSuccess = strcasecmp($normalized, 'Result') === 0 || strcasecmp($normalized, 'Success') === 0;
 
             if ($isSuccess) {
-                Log::info('Dreams SMS sent successfully', [
-                    'to'     => $payload['to'],
-                    'sender' => $sender,
-                    'response' => $normalized,
-                ]);
 
                 return new SmsResult(
                     success: true,
@@ -104,11 +98,6 @@ class DreamsGateway extends AbstractHttpConnection implements SmsGateway
 
             if (isset($errorMap[$normalized])) {
                 $err = $errorMap[$normalized];
-                Log::error('Dreams SMS failed', [
-                    'to'    => $payload['to'],
-                    'code'  => $normalized,
-                    'error' => $err,
-                ]);
 
                 return new SmsResult(
                     success: false,
@@ -118,10 +107,6 @@ class DreamsGateway extends AbstractHttpConnection implements SmsGateway
             }
 
             // Unknown / unexpected response
-            Log::error('Dreams SMS unknown response', [
-                'to'       => $payload['to'],
-                'response' => $normalized,
-            ]);
 
             return new SmsResult(
                 success: false,
@@ -129,15 +114,12 @@ class DreamsGateway extends AbstractHttpConnection implements SmsGateway
                 error: 'Unknown response from Dreams API'
             );
         } catch (Throwable $e) {
-            Log::error('Dreams SMS error', [
-                'to'    => is_array($message->to) ? implode(',', $message->to) : (string)$message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'dreams',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

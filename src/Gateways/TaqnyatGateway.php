@@ -3,7 +3,6 @@
 namespace YasserElgammal\LaraSms\Gateways;
 
 use Throwable;
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -35,12 +34,12 @@ class TaqnyatGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->token) {
-                throw new \Exception('Taqnyat token not configured');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Taqnyat token not configured');
             }
 
             $sender = $message->from ?? $this->senderId;
             if (!$sender) {
-                throw new \Exception('Taqnyat sender_id not configured or provided in message');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Taqnyat sender_id not configured or provided in message');
             }
 
             // Taqnyat expects an array of recipients
@@ -78,11 +77,6 @@ class TaqnyatGateway extends AbstractHttpConnection implements SmsGateway
             $isOk = $messageId || in_array($status, ['success', 'queued', 'sent', 'accepted'], true);
 
             if ($isOk) {
-                Log::info('Taqnyat SMS sent successfully', [
-                    'to'         => $recipients,
-                    'message_id' => $messageId,
-                    'status'     => $status ?: 'success',
-                ]);
 
                 return new SmsResult(
                     success: true,
@@ -93,27 +87,18 @@ class TaqnyatGateway extends AbstractHttpConnection implements SmsGateway
 
             $errorText = $response['message'] ?? $response['error'] ?? 'Unknown error';
 
-            Log::error('Taqnyat SMS failed', [
-                'to'     => $recipients,
-                'status' => $status ?: 'unknown',
-                'error'  => $errorText,
-            ]);
-
             return new SmsResult(
                 success: false,
                 gateway: 'taqnyat',
                 error: $errorText
             );
         } catch (Throwable $e) {
-            Log::error('Taqnyat SMS error', [
-                'to'    => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'taqnyat',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

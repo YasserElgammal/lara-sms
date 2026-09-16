@@ -6,7 +6,6 @@ use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
 use YasserElgammal\LaraSms\Network\AbstractHttpConnection;
-use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class SmsMisrGateway extends AbstractHttpConnection implements SmsGateway
@@ -27,7 +26,7 @@ class SmsMisrGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->username || !$this->password) {
-                throw new \Exception("SMS Misr credentials not configured");
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("SMS Misr credentials not configured");
             }
 
             $payload = [
@@ -47,10 +46,6 @@ class SmsMisrGateway extends AbstractHttpConnection implements SmsGateway
             $response = $this->post('https://smsmisr.com/api/SMS/', $payload);
 
             if (isset($response['code']) && $response['code'] === '4901') {
-                Log::info('SMS Misr sent successfully', [
-                    'to' => $message->to,
-                    'smsid' => $response['smsid'] ?? null,
-                ]);
 
                 return new SmsResult(
                     success: true,
@@ -59,27 +54,18 @@ class SmsMisrGateway extends AbstractHttpConnection implements SmsGateway
                 );
             }
 
-            Log::error('SMS Misr failed', [
-                'to' => $message->to,
-                'error' => $response['message'] ?? 'Unknown error',
-                'code' => $response['code'] ?? null,
-            ]);
-
             return new SmsResult(
                 success: false,
                 gateway: 'smsmisr',
                 error: $response['message'] ?? 'Unknown error'
             );
         } catch (\Throwable $e) {
-            Log::error('SMS Misr error', [
-                'to' => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'smsmisr',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }
@@ -103,14 +89,10 @@ class SmsMisrGateway extends AbstractHttpConnection implements SmsGateway
             try {
                 $carbon = Carbon::parse($delayUntil);
             } catch (\Exception $e) {
-                Log::warning('[Msegat] Invalid delay_until format', [
-                    'value' => $delayUntil,
-                    'error' => $e->getMessage(),
-                ]);
-                throw new \Exception("Invalid delay_until format: {$delayUntil}");
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("Invalid delay_until format: {$delayUntil}");
             }
         } else {
-            throw new \Exception("Invalid delay_until type");
+            throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("Invalid delay_until type");
         }
     }
 }

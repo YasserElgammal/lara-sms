@@ -6,18 +6,39 @@ intelligent fallback mechanisms, and a fluent builder pattern for clean message 
 
 ---
 
+## [2.0.0]
+
+Version 2.0.0 requires PHP 8.2+ and Laravel / Illuminate 12.x.
+
+- Send messages asynchronously with `SmsSendBuilder::queue()`.
+- Use `SmsResult::retryable` to distinguish retryable, permanent, and unknown
+  failures.
+- `FAIL_FAST` now moves to the next gateway only after an explicitly retryable
+  failure, while `TRY_ALL` continues after any failure.
+- HTTP `429` and `5xx` responses use the configured retry policy.
+- Invalid configuration and unknown gateway names now throw
+  `InvalidConfigurationException`.
+- Structured logs provide correlation IDs, durations, and attempt counts while
+  masking recipients and excluding sensitive message and provider data.
+
+Custom gateways should set `SmsResult::retryable` or throw
+`RetryableException` / `NonRetryableException`. See
+[CHANGELOG.md](CHANGELOG.md) for the complete release notes and upgrade details.
+
+---
+
 ## Features
 
-- ✅ **Multiple Gateway Support** - Twilio, Vonage, SMS Misr, Jawaly (easily add more)
-- ✅ **Strategy Pattern** - Pluggable gateway architecture
-- ✅ **Fluent Builder Pattern** - Clean, intuitive message construction
-- ✅ **Fallback Strategies** - Try All, Fail Fast, custom ordering
-- ✅ **Intelligent Retries** - Automatic retries for transient failures
-- ✅ **Error Differentiation** - Retryable vs Non-retryable errors
+- ✅ **Multiple Gateway Support** - Dreams, Infobip, Jawaly, MobilySms, Msegat, SMS Misr, Taqnyat, Twilio, Unifonic, and Vonage
+- ✅ **Fluent Builder Pattern** - Build and send messages through a clean, expressive API
+- ✅ **Queued Sending** - Dispatch SMS messages through Laravel queues
+- ✅ **Fallback Strategies** - Try All, Fail Fast, and custom gateway ordering
+- ✅ **Intelligent HTTP Retries** - Retry HTTP 429 and 5xx responses automatically
+- ✅ **Explicit Error Classification** - Retryable, permanent, and unknown failures
+- ✅ **Configuration Validation** - Detect invalid settings and unknown gateways early
+- ✅ **Structured Logging** - Correlated events, timings, and attempt counts with sensitive data masked
 - ✅ **Clean DTOs** - Structured message and result objects
-- ✅ **Configuration Driven** - All settings in config files
-- ✅ **Laravel Facade** - Easy access from anywhere
-- ✅ **Comprehensive Logging** - Full audit trail of all attempts
+- ✅ **Laravel Integration** - Service provider, facade, configuration, and queue support
 - ✅ **Metadata Support** - Attach custom data to messages
 
 ---
@@ -373,3 +394,35 @@ For major changes, please open an issue first to discuss what you’d like to mo
 ## ⚖️ License
 
 MIT © 2025 **Yasser Elgammal**
+
+
+## Reliability and queued sending
+
+Requires PHP 8.2+ and Laravel / Illuminate 12.x (matching the Testbench 10 test suite).
+
+`SmsResult::retryable` is `true` for typed retryable failures, `false` for typed permanent failures, and `null` for unknown failures. Custom gateways should set this field or throw `RetryableException` / `NonRetryableException`. Error text is for diagnostics only. `FAIL_FAST` continues only after an explicitly retryable failure; `TRY_ALL` continues after any failed result. This changes fallback behavior for custom gateways returning only error strings.
+
+HTTP 429 and 5xx responses use the configured retry count and delay. `retry_attempts` counts total HTTP attempts, including the first request. Other HTTP errors are permanent. Connection failures remain unknown and are not retried by the HTTP layer: a timeout may occur after the provider accepted the message. Provider-specific errors returned with HTTP 200 remain unknown unless the gateway explicitly classifies them.
+
+```php
+LaraSms::builder()
+    ->to('+201234567890')
+    ->text('Your verification code is 123456')
+    ->gateway('twilio')
+    ->queue(connection: 'redis', queue: 'sms');
+```
+
+Configure a non-sync queue connection and run a worker for the `sms` queue. Queue dispatch returns the dispatcher result, not an SMS delivery result. The job has one attempt and throws on a failed send so Laravel records the failure. HTTP retries and selected fallback still happen inside that attempt. There is no automatic replay of the entire job.
+
+This reduces duplicate sends but does not guarantee exactly-once delivery. HTTP 5xx retries, TRY_ALL after timeouts, worker crashes, and manually retrying failed jobs can still duplicate messages. Check provider delivery state before manual replay. Set the worker timeout above the complete HTTP retry/fallback budget and the queue retry_after (or SQS visibility timeout) above the worker timeout. See [Laravel queue timeouts](https://laravel.com/docs/12.x/queues#job-expirations-and-timeouts).
+
+Run the fake-HTTP regression suite with `composer test`. Tests never send real SMS.
+
+
+### Structured logging
+
+Managed sends emit `send.started`, `gateway.completed`, and `send.completed` events with a random `correlation_id` shared across fallback gateways and HTTP retries. Each new send gets a new ID. Gateway events include `gateway_attempt`, `duration_ms`, `success`, and `error_classification` (`retryable`, `permanent`, or `unknown`; null on success). Completion events include total duration and gateway attempt count.
+
+The HTTP layer emits `http.completed` at debug level for each attempt, including `http_attempt`, `max_attempts`, HTTP `status` (null for a connection failure), and request duration excluding retry sleep. Enable debug logging to collect these details. Gateway and total durations include retry delays. Provider acceptance is not proof of final handset delivery.
+
+Package logs show only the recipient's last four characters; short recipients are fully masked. Raw URLs, headers, payloads, provider responses, message IDs, and exception text are omitted. Result objects still contain provider diagnostics: avoid logging them wholesale. Custom gateway logging and external HTTP/queue instrumentation must apply their own privacy controls. These structured events can feed your existing log monitoring; no dashboard or alerting service is installed.

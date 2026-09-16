@@ -6,7 +6,6 @@ use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
 use YasserElgammal\LaraSms\Network\AbstractHttpConnection;
-use Illuminate\Support\Facades\Log;
 
 class TwilioGateway extends AbstractHttpConnection implements SmsGateway
 {
@@ -26,7 +25,7 @@ class TwilioGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->sid || !$this->token) {
-                throw new \Exception("Twilio credentials not configured");
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("Twilio credentials not configured");
             }
 
             $response = $this->post(
@@ -41,26 +40,18 @@ class TwilioGateway extends AbstractHttpConnection implements SmsGateway
                 ]
             );
 
-            Log::info('Twilio SMS sent successfully', [
-                'to' => $message->to,
-                'sid' => $response['sid'] ?? null,
-            ]);
-
             return new SmsResult(
                 success: true,
                 messageId: $response['sid'] ?? null,
                 gateway: 'twilio'
             );
         } catch (\Throwable $e) {
-            Log::error('Twilio SMS failed', [
-                'to' => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'twilio',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

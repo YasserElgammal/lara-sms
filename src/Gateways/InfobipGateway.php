@@ -2,7 +2,6 @@
 
 namespace YasserElgammal\LaraSms\Gateways;
 
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -32,7 +31,7 @@ class InfobipGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->apiKey) {
-                throw new \Exception('Infobip API key not configured');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Infobip API key not configured');
             }
 
             $url = $this->baseUrl . '/sms/3/messages';
@@ -75,12 +74,6 @@ class InfobipGateway extends AbstractHttpConnection implements SmsGateway
             // Infobip marks accepted/queued sends as PENDING (groupId = 1).
             // Treat groupId=1 as success at send-time.
             if ($groupId === 1) {
-                Log::info('Infobip SMS accepted', [
-                    'to'          => $message->to,
-                    'message_id'  => $messageId,
-                    'status_name' => $statusName,
-                    'description' => $description,
-                ]);
 
                 return new SmsResult(
                     success: true,
@@ -92,27 +85,18 @@ class InfobipGateway extends AbstractHttpConnection implements SmsGateway
             // Anything else => fail now with the provided description/name.
             $errorText = $description ?: $statusName ?: 'Unknown Infobip error';
 
-            Log::error('Infobip SMS failed', [
-                'to'          => $message->to,
-                'status'      => $status,
-                'response'    => $response,
-            ]);
-
             return new SmsResult(
                 success: false,
                 gateway: 'infobip',
                 error: $errorText
             );
         } catch (\Throwable $e) {
-            Log::error('Infobip SMS exception', [
-                'to'    => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'infobip',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

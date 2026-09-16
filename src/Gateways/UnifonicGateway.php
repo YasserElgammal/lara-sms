@@ -2,7 +2,6 @@
 
 namespace YasserElgammal\LaraSms\Gateways;
 
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -31,7 +30,7 @@ class UnifonicGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->appSid) {
-                throw new \Exception('Unifonic AppSid not configured');
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Unifonic AppSid not configured');
             }
 
             $payload = [
@@ -50,11 +49,6 @@ class UnifonicGateway extends AbstractHttpConnection implements SmsGateway
             $messageId = $response['messageID'] ?? null;
 
             if (in_array($status, ['queued', 'sent'], true)) {
-                Log::info('Unifonic SMS sent successfully', [
-                    'to' => $message->to,
-                    'message_id' => $messageId,
-                    'status' => $status,
-                ]);
 
                 return new SmsResult(
                     success: true,
@@ -63,27 +57,18 @@ class UnifonicGateway extends AbstractHttpConnection implements SmsGateway
                 );
             }
 
-            Log::error('Unifonic SMS failed', [
-                'to' => $message->to,
-                'status' => $status,
-                'error' => $response['errorMessage'] ?? 'Unknown error',
-            ]);
-
             return new SmsResult(
                 success: false,
                 gateway: 'unifonic',
                 error: $response['errorMessage'] ?? 'Unknown error'
             );
         } catch (\Throwable $e) {
-            Log::error('Unifonic SMS error', [
-                'to' => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'unifonic',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }
