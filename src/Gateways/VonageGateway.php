@@ -2,7 +2,6 @@
 
 namespace YasserElgammal\LaraSms\Gateways;
 
-use Illuminate\Support\Facades\Log;
 use YasserElgammal\LaraSms\Contracts\SmsGateway;
 use YasserElgammal\LaraSms\Data\SmsMessage;
 use YasserElgammal\LaraSms\Data\SmsResult;
@@ -27,7 +26,7 @@ class VonageGateway extends AbstractHttpConnection implements SmsGateway
     {
         try {
             if (!$this->apiKey || !$this->apiSecret) {
-                throw new \Exception("Vonage credentials not configured");
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException("Vonage credentials not configured");
             }
 
             $url = 'https://rest.nexmo.com/sms/json';
@@ -58,13 +57,6 @@ class VonageGateway extends AbstractHttpConnection implements SmsGateway
             if ((string)$status === '0') {
                 $messageId = $msg['message-id'] ?? null;
 
-                Log::info('Vonage SMS sent successfully', [
-                    'to'          => $message->to,
-                    'message_id'  => $messageId,
-                    'price'       => $msg['message-price'] ?? null,
-                    'balance'     => $msg['remaining-balance'] ?? null,
-                ]);
-
                 return new SmsResult(
                     success: true,
                     messageId: $messageId,
@@ -75,28 +67,18 @@ class VonageGateway extends AbstractHttpConnection implements SmsGateway
             // فشل
             $errorText = $msg['error-text'] ?? 'Unknown error';
 
-            Log::error('Vonage SMS failed', [
-                'to'       => $message->to,
-                'status'   => $status,
-                'error'    => $errorText,
-                'response' => $response,
-            ]);
-
             return new SmsResult(
                 success: false,
                 gateway: 'vonage',
                 error: $errorText
             );
         } catch (\Throwable $e) {
-            Log::error('Vonage SMS error', [
-                'to'    => $message->to,
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: 'vonage',
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
     }

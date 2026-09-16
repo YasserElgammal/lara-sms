@@ -9,7 +9,8 @@ class SmsResult
         public readonly ?string $messageId = null,
         public readonly ?string $gateway = null,
         public readonly ?string $error = null,
-        public readonly array $attempts = []
+        public readonly array $attempts = [],
+        public readonly ?bool $retryable = null
     ) {}
 
     public function toArray(): array
@@ -20,6 +21,7 @@ class SmsResult
             'gateway' => $this->gateway,
             'error' => $this->error,
             'attempts' => $this->attempts,
+            'retryable' => $this->retryable,
         ];
     }
 }

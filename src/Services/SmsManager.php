@@ -17,6 +17,18 @@ class SmsManager
 
     public function __construct(array $config)
     {
+        if (!is_array($config['gateways'] ?? null) || !$config['gateways'] ||
+            !is_string($config['default_fallback_strategy'] ?? null) ||
+            FallbackStrategy::tryFrom($config['default_fallback_strategy']) === null ||
+            !is_array($config['http'] ?? null)) {
+            throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Invalid SMS configuration');
+        }
+        foreach ($config['gateways'] as $gateway) {
+            if (!is_array($gateway) || !is_string($gateway['class'] ?? null) ||
+                !is_a($gateway['class'], SmsGateway::class, true) || !is_array($gateway['config'] ?? null)) {
+                throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Invalid gateway configuration');
+            }
+        }
         $this->config = $config;
         $this->initializeGateways();
     }
@@ -51,74 +63,64 @@ class SmsManager
         $strategy = $strategy ?? FallbackStrategy::from($this->config['default_fallback_strategy']);
         $gatewayOrder = $gatewayOrder ?? array_keys($this->config['gateways']);
 
+        if (!$gatewayOrder || array_filter($gatewayOrder, fn ($name) => !is_string($name) || !isset($this->gateways[$name]))) {
+            throw new \YasserElgammal\LaraSms\Exceptions\InvalidConfigurationException('Unknown or empty gateway order');
+        }
         $attempts = [];
-
-        Log::info('[LaraSms] Sending SMS', [
-            'to' => $message->to,
+        $started = hrtime(true);
+        $context = [
+            'correlation_id' => bin2hex(random_bytes(16)),
+            'recipient' => strlen($message->to) > 4 ? '***' . substr($message->to, -4) : '***',
             'strategy' => $strategy->value,
-            'gateways' => $gatewayOrder,
-        ]);
+        ];
+        Log::info('[LaraSms] send.started', $context);
 
         foreach ($gatewayOrder as $gatewayName) {
-            if (!isset($this->gateways[$gatewayName])) {
-                Log::warning("[LaraSms] Gateway not found: {$gatewayName}");
-                continue;
-            }
-
             $gateway = $this->gateways[$gatewayName];
-            $result = $this->attemptSend($gateway, $message);
-
-            $attempts[] = [
-                'gateway' => $gatewayName,
+            $gatewayStarted = hrtime(true);
+            $gatewayContext = $context + ['gateway' => $gatewayName, 'gateway_attempt' => count($attempts) + 1];
+            if ($gateway instanceof \YasserElgammal\LaraSms\Network\AbstractHttpConnection) {
+                $result = $gateway->withTelemetry($gatewayContext, fn () => $this->attemptSend($gateway, $message));
+            } else {
+                $result = $this->attemptSend($gateway, $message);
+            }
+            Log::log($result->success ? 'info' : 'warning', '[LaraSms] gateway.completed', $gatewayContext + [
+                'duration_ms' => round((hrtime(true) - $gatewayStarted) / 1e6, 3),
                 'success' => $result->success,
-                'error' => $result->error,
+                'error_classification' => $result->success ? null : ($result->retryable === null ? 'unknown' : ($result->retryable ? 'retryable' : 'permanent')),
+            ]);
+            $attempts[] = [
+                'gateway' => $gatewayName, 'success' => $result->success,
+                'error' => $result->error, 'retryable' => $result->retryable,
                 'timestamp' => now()->toDateTimeString(),
             ];
-
             if ($result->success) {
-                Log::info('[LaraSms] SMS sent successfully', [
-                    'to' => $message->to,
-                    'gateway' => $gatewayName,
-                    'message_id' => $result->messageId,
-                    'attempts' => count($attempts),
+                Log::info('[LaraSms] send.completed', $context + [
+                    'success' => true, 'gateway_attempts' => count($attempts),
+                    'duration_ms' => round((hrtime(true) - $started) / 1e6, 3),
                 ]);
-
-                return new SmsResult(
-                    success: true,
-                    messageId: $result->messageId,
-                    gateway: $gatewayName,
-                    attempts: $attempts
-                );
+                return new SmsResult(success: true, messageId: $result->messageId, gateway: $gatewayName, attempts: $attempts);
             }
 
-            // If fail fast strategy and this is a non-retryable error, stop
+
+            // Fail fast continues only for explicitly retryable failures.
             if (
                 $strategy === FallbackStrategy::FAIL_FAST &&
-                $this->isNonRetryableError($result->error)
+                $result->retryable !== true
             ) {
-                Log::warning('[LaraSms] Non-retryable error detected, stopping', [
-                    'gateway' => $gatewayName,
-                    'error' => $result->error,
-                ]);
                 break;
             }
-
-            Log::warning('[LaraSms] Gateway failed, trying next', [
-                'to' => $message->to,
-                'gateway' => $gatewayName,
-                'error' => $result->error,
-            ]);
         }
 
-        Log::error('[LaraSms] All gateways failed', [
-            'to' => $message->to,
-            'attempts' => $attempts,
+        Log::warning('[LaraSms] send.completed', $context + [
+            'success' => false, 'gateway_attempts' => count($attempts),
+            'duration_ms' => round((hrtime(true) - $started) / 1e6, 3),
         ]);
-
         return new SmsResult(
             success: false,
             error: "All gateways failed",
-            attempts: $attempts
+            attempts: $attempts,
+            retryable: $result->retryable
         );
     }
 
@@ -134,46 +136,14 @@ class SmsManager
         try {
             return $gateway->send($message);
         } catch (\Throwable $e) {
-            Log::debug('[LaraSms] Gateway attempt error', [
-                'gateway' => $gateway->getName(),
-                'error' => $e->getMessage(),
-            ]);
 
             return new SmsResult(
                 success: false,
                 gateway: $gateway->getName(),
-                error: $e->getMessage()
+                error: $e->getMessage(),
+                retryable: $e instanceof \YasserElgammal\LaraSms\Exceptions\RetryableException ? true : ($e instanceof \YasserElgammal\LaraSms\Exceptions\NonRetryableException ? false : null)
             );
         }
-    }
-
-    /**
-     * Check if error is non-retryable
-     * 
-     * @param string|null $error
-     * @return bool
-     */
-    protected function isNonRetryableError(?string $error): bool
-    {
-        if (!$error) return false;
-
-        $nonRetryablePatterns = [
-            'invalid phone number',
-            'unauthorized',
-            'forbidden',
-            'bad request',
-            'invalid credentials',
-            'not configured',
-            'missing',
-        ];
-
-        foreach ($nonRetryablePatterns as $pattern) {
-            if (stripos($error, $pattern) !== false) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**
