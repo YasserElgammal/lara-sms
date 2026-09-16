@@ -109,6 +109,13 @@ class SmsSendBuilder
         );
     }
 
+    public function queue(?string $connection = null, ?string $queue = null): mixed
+    {
+        $job = new \YasserElgammal\LaraSms\Jobs\SendSms($this->build(), $this->fallbackStrategy, $this->gatewayOrder);
+        $job->onConnection($connection)->onQueue($queue);
+        return app(\Illuminate\Contracts\Bus\Dispatcher::class)->dispatch($job);
+    }
+
     public function getState(): array
     {
         return [
